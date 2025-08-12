@@ -41,11 +41,8 @@ FP6_E3M2 = [
     0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 24.0, 28.0, 32.0, 40.0, 48.0, 56.0, 64.0, 80.0, 96.0, 112.0, 128.0, 160.0, 192.0, 224.0, 256.0, 320.0, 384.0, 448.0
 ]
 #-----------------------------------------------------------------------------------------
-#################################  7-bit Datatypes  #################################
-INT7 = list(range(-63,64)) # -63,-62,-61, ..., 0, 1, 2, ..., 63
-
 #################################  8-bit Datatypes  #################################
-INT8 = list(range(-127,128)) # -127,-126,-125, ..., 0, 1, 2, ..., 126, 127
+INT8=list(range(-127,128)) # -127,-126,-125, ..., 0, 1, 2, ..., 126, 127
 FP8_E2M5 = [
     -7.875, -7.75, -7.625, -7.5, -7.375, -7.25, -7.125, -7.0, -6.875, -6.75, -6.625, -6.5, -6.375, -6.25, -6.125, -6.0, -5.875,
     -5.75, -5.625, -5.5, -5.375, -5.25, -5.125, -5.0, -4.875, -4.75, -4.625, -4.5, -4.375, -4.25, -4.125, -4.0, -3.9375, -3.875, -3.8125,
@@ -146,22 +143,20 @@ DATATYPE_MAPPING_6_BIT = {
     'fp6_e2m3': FP6_E2M3, 'fp6_e3m2': FP6_E3M2
 }
 #---------- bit-width extension ------------------------"Inseo"
-DATATYPE_MAPPING_7_BIT = {
-    'int7' : INT7
-}
-
-DATATYPE_MAPPING_8_BIT={
-    'int8': INT8,
-    'fp8_e2m5' : FP8_E2M5, 'fp8_e3m4': FP8_E3M4, 
-    'fp8_e4m3' : FP8_E4M3, 'fp8_e5m2': FP8_E5M2
+DATATYPE_MAPPING_8_BIT={'int8': INT8,
+                        'fp8_e2m5' : FP8_E2M5, 'fp8_e3m4': FP8_E3M4, 
+                        'fp8_e4m3' : FP8_E4M3, 'fp8_e5m2': FP8_E5M2
 }
 #-------------------------------------------------------------
 
-'''
+
 @torch.no_grad()
 def quant_int(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
     """
-        Symmetric INT quantization. (FP16)
+        Symmetric INT quantization.
+        group size:
+            -1      : per-tensor 
+            0/None  : per-channel
     """    
     if (group_size is None) or (group_size <= 0):
         w_fp16_new = w_fp16.to(torch.float16)
@@ -182,37 +177,12 @@ def quant_int(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
         return w_fp16_new
     else:
         return w_fp16_new.reshape(K, C)
-'''
-def quant_int(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
-    """
-        Symmetric INT quantization. (FP32)
-    """    
-    if (group_size is None) or (group_size <= 0):
-        w_fp32 = w_fp16.to(torch.float32)
-    else:
-        K, C = w_fp16.size() # output channel, input channel
-        NUM_GROUP = C // group_size
-        w_fp32 = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size).to(torch.float32)
-    
-    rmax = torch.amax(w_fp32.abs(), dim=-1, keepdim=True)
-    qmax = 2 ** (wq_bits - 1) - 1
-    qmin = -qmax
-    scale_fp = rmax / qmax
-    scale_fp = scale_fp.clamp(min=1e-5, max=1e4)
-    q_tensor = torch.clamp(torch.round(w_fp32 / scale_fp), min=qmin, max=qmax)
 
-    w_fp32_tensor = q_tensor * scale_fp
-    w_fp16_tensor = w_fp32_tensor.to(torch.float16)
-    if (group_size is None) or (group_size <= 0):
-        return w_fp16_tensor
-    else:
-        return w_fp16_tensor.reshape(K, C)
 
-'''
 @torch.no_grad()
 def quant_int_asym(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
     """
-        Asymmetric INT quantization. (FP16)
+        Asymmetric INT quantization.
     """    
     if (group_size is None) or (group_size <= 0):
         w_fp16_new = w_fp16.to(torch.float16)
@@ -236,35 +206,6 @@ def quant_int_asym(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
         return w_fp16_new
     else:
         return w_fp16_new.reshape(K, C)
-'''
-@torch.no_grad()
-def quant_int_asym(w_fp16, wq_bits:int=4, group_size: Optional[int]=None):
-    """
-        Asymmetric INT quantization. (FP32 operation-> FP16 casting)
-    """    
-    if (group_size is None) or (group_size <= 0):
-        w_fp32 = w_fp16.to(torch.float32)
-    else:
-        K, C = w_fp16.size() # output channel, input channel
-        NUM_GROUP = C // group_size
-        w_fp32 = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size).to(torch.float32)
-    
-    rmin = torch.amin(w_fp32, dim=-1, keepdim=True)
-    rmax = torch.amax(w_fp32, dim=-1, keepdim=True)
-    qmin = 0
-    qmax = 2**wq_bits - 1
-    scale_fp = (rmax - rmin) / (qmax - qmin)
-    scale_fp = scale_fp.clamp(min=1e-5, max=1e4)
-    zeropoint = torch.round(-rmin / scale_fp).clamp(min=qmin, max=qmax)
-
-    q_tensor = torch.clamp(torch.round(w_fp32 / scale_fp) + zeropoint, min=qmin, max=qmax)
-
-    w_fp32_tensor = (q_tensor - zeropoint) * scale_fp
-    w_fp16_tensor = w_fp32_tensor.to(torch.float16)
-    if (group_size is None) or (group_size <= 0):
-        return w_fp16_tensor
-    else:
-        return w_fp16_tensor.reshape(K, C)
 
 
 @torch.no_grad()
@@ -348,7 +289,7 @@ def quant_fp(w_fp16, wq_bits:int=4, datatype: str="", group_size: int=32):
     return w_fp16_new.reshape(K, C).to(torch.float16) """
 
 #---------------------------
-""" @torch.no_grad()
+@torch.no_grad()
 def quant_datatype(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional[int]=None):
     if datatype == "fp8_e5m2": 
         from torch import tensor
@@ -380,8 +321,6 @@ def quant_datatype(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional
         DATATYPE_MAPPING = DATATYPE_MAPPING_5_BIT
     elif wq_bits == 6:
         DATATYPE_MAPPING = DATATYPE_MAPPING_6_BIT
-    elif wq_bits == 7:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_7_BIT
     elif wq_bits == 8:                              # inseo
         DATATYPE_MAPPING = DATATYPE_MAPPING_8_BIT    
     else:
@@ -420,81 +359,7 @@ def quant_datatype(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional
     if (group_size is None) or (group_size <= 0):
         return w_fp16_new
     else:
-        return w_fp16_new.reshape(K, C) """
-        
-@torch.no_grad()
-def quant_datatype(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional[int]=None):
-    if datatype == "fp8_e5m2": 
-        from torch import tensor
-        w = w_fp16.to(torch.float32)
-        if group_size and group_size > 0:
-            K, C = w.size()
-            w = w.unsqueeze(-1).reshape(K, C // group_size, group_size)
-        # scale 계산
-        rmax   = torch.amax(w.abs(), dim=-1, keepdim=True)
-        allow  = tensor(DATATYPE_MAPPING_8_BIT[datatype], dtype=torch.float32, device=w.device)
-        qmax   = allow.abs().amax()
-        scale  = (rmax / qmax).clamp(min=1e-5, max=1e4)
-        # quantize
-        x      = w / scale
-        mid    = (allow[:-1] + allow[1:]) * 0.5
-        q      = torch.zeros_like(x, dtype=torch.float32)
-        edges  = torch.cat([tensor([-float('inf')], device=w.device), mid, tensor([float('inf')], device=w.device)])
-        for i, v in enumerate(allow):
-            mask = (edges[i] < x) & (x <= edges[i+1])
-            q = torch.where(mask, v, q)
-        w_deq = q * scale
-        return (w_deq.reshape_as(w_fp16)
-                if group_size and group_size > 0 else w_deq)    
-    if wq_bits == 3:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_3_BIT
-    elif wq_bits == 4:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_4_BIT
-    elif wq_bits == 5:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_5_BIT
-    elif wq_bits == 6:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_6_BIT
-    elif wq_bits == 7:
-        DATATYPE_MAPPING = DATATYPE_MAPPING_7_BIT
-    elif wq_bits == 8:                              # inseo
-        DATATYPE_MAPPING = DATATYPE_MAPPING_8_BIT    
-    else:
-        raise ValueError(f"Currently only support 3-, 4-, 5-,6- and 8-bit quantization, not {wq_bits}-bit")
-
-    assert datatype in DATATYPE_MAPPING, f"unexpected data type {datatype}."
-
-    allow_value = DATATYPE_MAPPING[datatype]
-    mid_value = [(allow_value[i] + allow_value[i + 1]) / 2 for i in range(len(allow_value) - 1)]
-
-    if (group_size is None) or (group_size <= 0):
-        w_fp32 = w_fp16.to(torch.float32)
-    else:
-        K, C = w_fp16.size() # output channel, input channel
-        NUM_GROUP = C // group_size
-        w_fp32 = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size).to(torch.float32)
-
-    rmax = torch.amax(w_fp32.abs(), dim=-1, keepdim=True)
-    qmax = max([abs(x) for x in allow_value])
-    scale_fp = rmax / qmax
-    scale_fp = scale_fp.clamp(min=1e-5, max=1e4)
-    x = w_fp32 / scale_fp
-
-    q_tensor = torch.zeros_like(x)
-    for i in range(len(allow_value)):
-        data = allow_value[i]
-        if i == 0:
-            q_tensor += torch.where(x <= mid_value[i], data, 0)
-        elif i == len(allow_value) - 1:
-            q_tensor += torch.where(x > mid_value[i - 1], data, 0)
-        else:
-            q_tensor += torch.where((mid_value[i - 1] < x) & (x <= mid_value[i]), data, 0)
-
-    w_fp32_tensor = q_tensor * scale_fp 
-    w_fp16_tensor = w_fp32_tensor.to(torch.float16)
-    if (group_size is None) or (group_size <= 0):
-        return w_fp16_tensor 
-    else:
-        return w_fp16_tensor.reshape(K, C) 
+        return w_fp16_new.reshape(K, C)
 
 
 @torch.no_grad()
@@ -610,11 +475,11 @@ def _int_quant_meta(w_fp16: torch.Tensor,
     """
     # ---- per-channel·per-group reshape ---------------------------------
     if (group_size is None) or (group_size <= 0):
-        w_view = w_fp16.to(torch.float32)  # float16 -> float32     2025.08.08
+        w_view = w_fp16.to(torch.float16)
     else:                                   # [K,C] → [K,Ng,gs]
         K, C = w_fp16.size()
         Ng = C // group_size
-        w_view = w_fp16.unsqueeze(-1).reshape(K, Ng, group_size).to(torch.float32)
+        w_view = w_fp16.unsqueeze(-1).reshape(K, Ng, group_size).to(torch.float16)
 
     if asym:                                # ---------- Asymmetric -------
         rmin = torch.amin(w_view, dim=-1, keepdim=True)
@@ -626,7 +491,6 @@ def _int_quant_meta(w_fp16: torch.Tensor,
         q = torch.round(w_view / scale) + zp
         q = torch.clamp(q, min=qmin, max=qmax)
         w_deq = (q - zp) * scale
-        w_deq = w_deq.to(torch.float16)
         return w_deq.reshape_as(w_fp16), q.to(torch.int8), scale.squeeze(-1), zp.squeeze(-1)
 
     else:                                   # ---------- Symmetric --------
@@ -636,7 +500,6 @@ def _int_quant_meta(w_fp16: torch.Tensor,
         q = torch.round(w_view / scale).clamp_(
             min=-qmax, max=qmax)            # -7‥+7(4bit) / -127‥+127(8bit)
         w_deq = q * scale
-        w_deq = w_deq.to(torch.float16)
         return w_deq.reshape_as(w_fp16), q.to(torch.int8), scale.squeeze(-1), None
 
 # ----------  FP-quantization + metadata  ---------------------------------
@@ -650,12 +513,10 @@ def _fp_quant_meta(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional
         DATATYPE_MAPPING = DATATYPE_MAPPING_5_BIT
     elif wq_bits == 6:
         DATATYPE_MAPPING = DATATYPE_MAPPING_6_BIT
-    elif wq_bits == 7:                              # inseo
-        DATATYPE_MAPPING = DATATYPE_MAPPING_7_BIT
     elif wq_bits == 8:                              # inseo
         DATATYPE_MAPPING = DATATYPE_MAPPING_8_BIT    
     else:
-        raise ValueError(f"Currently only support 3-, 4-, 5-, 6-, 7- and 8-bit quantization, not {wq_bits}-bit")
+        raise ValueError(f"Currently only support 3-, 4-, 5-,6- and 8-bit quantization, not {wq_bits}-bit")
 
     assert datatype in DATATYPE_MAPPING, f"unexpected data type {datatype}."
     
@@ -690,17 +551,17 @@ def _fp_quant_meta(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional
     mid_value = [(allow_value[i] + allow_value[i + 1]) / 2 for i in range(len(allow_value) - 1)]
 
     if (group_size is None) or (group_size <= 0):
-        w_fp32 = w_fp16.to(torch.float32)
+        w_fp16_new = w_fp16.to(torch.float16)
     else:
         K, C = w_fp16.size() # output channel, input channel
         NUM_GROUP = C // group_size
-        w_fp32 = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size).to(torch.float32)
+        w_fp16_new = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size).to(torch.float16)
 
-    rmax = torch.amax(w_fp32.abs(), dim=-1, keepdim=True)
+    rmax = torch.amax(w_fp16_new.abs(), dim=-1, keepdim=True)
     qmax = max([abs(x) for x in allow_value])
     scale_fp = rmax / qmax
     scale_fp = scale_fp.clamp(min=1e-5, max=1e4)
-    x = w_fp32 / scale_fp
+    x = w_fp16_new / scale_fp
 
     q_tensor = torch.zeros_like(x)
     for i in range(len(allow_value)):
@@ -712,13 +573,12 @@ def _fp_quant_meta(w_fp16, wq_bits:int=4, datatype: str="", group_size: Optional
         else:
             q_tensor += torch.where((mid_value[i - 1] < x) & (x <= mid_value[i]), data, 0)
 
-    w_fp32_tensor = q_tensor * scale_fp
-    w_fp16_tensor = w_fp32_tensor.to(torch.float16)
+    w_fp16_new = q_tensor * scale_fp 
 
     if (group_size is None) or (group_size <= 0):
-        return w_fp16_tensor, q_tensor.to(torch.float16), scale_fp.squeeze(-1)
+        return w_fp16_new, q_tensor.to(torch.float16), scale_fp.squeeze(-1)
     else:
-        return w_fp16_tensor.reshape(K, C), q_tensor.to(torch.float16), scale_fp.squeeze(-1)
+        return w_fp16_new.reshape(K, C), q_tensor.to(torch.float16), scale_fp.squeeze(-1)
 
 
 class _LinearDump(nn.Linear):
@@ -757,7 +617,7 @@ class _LinearDump(nn.Linear):
             dummy += self.weight_zp.float().sum()
         return out + dummy * 0.0
 
-# ---------- 3) original quant_model ➜ wrapping  -------------------------------
+# ---------- 3) original quant_model ➜ 래핑  -------------------------------
 _original_quant_model = quant_model  # keep original
 
 def quant_model(model, wq_bits=None, wq_datatype=None,
