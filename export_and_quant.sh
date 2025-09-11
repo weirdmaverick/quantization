@@ -1,54 +1,43 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# data save directory 
 export HF_HOME="results_quant"
 
-# model
+# model list
 declare -a model_list=(
-  "facebook/opt-1.3b"
-  "microsoft/phi-2"
-  "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+  "facebook/opt-1.3b" "microsoft/phi-2" "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 )
-  #"facebook/opt-1.3b"
-  #"microsoft/phi-2"
-  #"TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+# ("facebook/opt-1.3b" "microsoft/phi-2" "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
-# bit width (baseline)
-#declare -a baseline_list=(16)
-
-# bit width (quant)
-declare -a wq_bit_list=(5)
-
-# group size: per-group(128), per-channel(-1)
-declare -a wq_groupsize_list=(128 -1)
+# ───────────────── Baseline (fp16) ─────────────────
+declare -a baseline_list=("fp16")    # "fp16" "bf16" "fp32"
 
 for model in "${model_list[@]}"; do
+  for baseline in "${baseline_list[@]}"; do
+    echo "===================="
+    echo "[Baseline] ${baseline} → ${model}"
+    python export_and_quant.py \
+      --model_name "${model}" \
+      --baseline_datatype "${baseline}"
+  done
+done
 
-  # ─── Baseline ─────────────────────────────
-  #for baseline in "${baseline_list[@]}"; do
-  #  echo "===================="
-  #  echo "[Baseline] Exporting FP${baseline} for ${model}"
-  #  python export_and_quant.py \
-  #    --model_name "${model}" \
-  #    --wq_bits "${baseline}"    \
-      # --wq_datatype 없이 baseline 처리
-  #done
+# ───────────────── Quantization ─────────────────
+# bit-width
+declare -a wq_bit_list=(4 8)
 
-  # ─── Quantization ─────────────────────────
+# Granularity: -1=per-tensor, 0=per-channel, 128=per-group, group size(128)
+declare -a wq_groupsize_list=(-1)
+
+for model in "${model_list[@]}"; do
   for wq_bit in "${wq_bit_list[@]}"; do
-    if [[ "$wq_bit" -eq 32 || "$wq_bit" -eq 16 ]]; then
-      continue
-    fi
-
-    # datatype list
-    case $wq_bit in
-      3)  datatype_list=(int3 int3_asym fp3)      ;;
-      4)  datatype_list=(int4 int4_asym fp4)  ;;
-      5)  datatype_list=(fp5_e2m2 fp5_e3m1)      ;; # (int5 int5_asym fp5_e2m2 fp5_e3m1) 
-      6)  datatype_list=(fp6_e2m3 fp6_e3m2) ;;      # (int6 int6_asym fp6_e2m3 fp6_e3m2)
-      7)  datatype_list=(int7 int7_asym)      ;;
-      8)  datatype_list=(int8 int8_asym fp8_e2m5 fp8_e3m4 fp8_e4m3 fp8_e5m2)      ;; # (int8 int8_asym fp8_e2m5 fp8_e3m4 fp8_e4m3 fp8_e5m2)
+    # datatype 
+    case "${wq_bit}" in
+      3)  datatype_list=(int3 int3_asym fp3) ;;
+      4)  datatype_list=(int4 int4_asym fp4) ;;  # (int4 int4_asym fp4)
+      5)  datatype_list=(int5 int5_asym fp5_e2m2 fp5_e3m1) ;;
+      6)  datatype_list=(int6 int6_asym fp6_e2m3 fp6_e3m2) ;;
+      8)  datatype_list=(int8 int8_asym fp8_e2m5 fp8_e3m4 fp8_e4m3 fp8_e5m2) ;; #(int8 int8_asym fp8_e2m5 fp8_e3m4 fp8_e4m3 fp8_e5m2)
       *)  echo "Unsupported bit width: ${wq_bit}" >&2; continue ;;
     esac
 
@@ -65,5 +54,4 @@ for model in "${model_list[@]}"; do
       done
     done
   done
-
 done
